@@ -1,0 +1,89 @@
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#mamba create -p /gpfs/fs7/grdi/genarcc/wp3/PolarBears/env/GONE
+mamba activate /gpfs/fs7/grdi/genarcc/wp3/PolarBears/env/GONE
+
+#Install vcftools and plink
+mamba install plink2
+mamba install vcftools
+
+#Copy GONE directory. Making this in the main PB folder because Ill reuse it for other analyses
+git clone https://github.com/esrud/GONE/
+
+#Set folder for IC files into the folder
+mkdir GONE/Linux/ICurb
+
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears
+
+
+#Filter vcf for hwe, but not LD
+vcftools --vcf $BASEDIR/ICurb/SNPs/variants_hardfilter.dp10.geno.maf.vcf --hwe 0.001 --recode --stdout > $BASEDIR/GONE/Linux/ICurb/variants_hardfilter.dp10.geno.maf.hwe.vcf 
+
+#Convert to ped and map format
+cd $BASEDIR/GONE/Linux/ICurb/
+plink2 --vcf variants_hardfilter.dp10.geno.maf.hwe.vcf --make-bed --recode ped --allow-extra-chr --out variants_hardfilter.dp10.geno.maf.hwe
+
+#Rename scaffolds to match GONE formating reqs (1-x) and snps (1-x). Scaffolds need to be in numeric order
+#SNPs first
+awk '{$2=FNR; print}' OFS='\t' variants_hardfilter.dp10.geno.maf.hwe.map > snp.rename.map
+#Scaffold next
+awk '{ printf "%0d\n",(!a[$1]++? ++c:c),a[$1],$0 }' variants_hardfilter.dp10.geno.maf.hwe.map > scaffold.list 
+cut -f2- snp.rename.map > no.scaffold
+#Paste it all together
+paste scaffold.list no.scaffold > scaffold.rename.map
+
+#Make new plink files with updated map and FID
+plink2 --ped variants_hardfilter.dp10.geno.maf.hwe.ped --map scaffold.rename.map --update-ids UpdateID_city.txt --make-bed --allow-extra-chr --out variants_hardfilter.dp10.geno.maf.hwe.renamed
+
+#Create population specific ped/map files
+echo "Brantford" > BF.txt
+echo "Burlington" > BT.txt
+echo "Cambridge" > CM.txt
+echo "Georgetown" > GT.txt
+echo "Guelph" > GU.txt
+echo "Hamilton" > HM.txt
+echo "Kitchener" > KT.txt
+echo "Milton" > MT.txt
+echo "Orangeville" > OJ.txt
+echo "Toronto" > TO.txt
+
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam BF.txt --recode ped --allow-extra-chr --out BF
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam BT.txt --recode ped --allow-extra-chr --out BT
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam CM.txt --recode ped --allow-extra-chr --out CM
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam GT.txt --recode ped --allow-extra-chr --out GT
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam GU.txt --recode ped --allow-extra-chr --out GU
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam HM.txt --recode ped --allow-extra-chr --out HM
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam KT.txt --recode ped --allow-extra-chr --out KT
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam MT.txt --recode ped --allow-extra-chr --out MT
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam OJ.txt --recode ped --allow-extra-chr --out OJ
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --keep-fam TO.txt --recode ped --allow-extra-chr --out TO
+
+plink2 --bfile variants_hardfilter.dp10.geno.maf.hwe.renamed --recode ped --allow-extra-chr --out ../All
+
+mv *ped ../
+mv *map ../
+#Test 
+cd ../
+ls
+
+chmod +x ./PROGRAMMES/SUMM_REP_CHROM3
+chmod +x ./PROGRAMMES/MANAGE_CHROMOSOMES2
+chmod +x ./PROGRAMMES/LD_SNP_REAL3
+chmod +x ./PROGRAMMES/GONE
+chmod +x ./PROGRAMMES/GONEaverage
+chmod +x ./PROGRAMMES/GONEparallel.sh
+
+
+#test
+bash script_GONE.sh example
+#Delete files because maybe that's an issue
+rm -r TEMPORARY_FILES/
+rm Out* out* OUT*
+
+bash script_GONE.sh BF
+
+sbatch gone.sh 
+squeue -u rur000

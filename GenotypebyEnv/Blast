@@ -1,0 +1,17 @@
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb
+
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#Run PB analysis environment
+mamba activate /gpfs/fs7/grdi/genarcc/wp3/PolarBears/env/analysis
+
+cd $BASEDIR
+
+#Load bedtools
+mamba install bedtools
+
+#extract sequences from fasta
+bedtools getfasta -fi Reference/Impatiens_capensis_hirise.fasta -bed Analysis/Blast/outlierlocations.bed -fo Analysis/Blast/outlier.fa.txt

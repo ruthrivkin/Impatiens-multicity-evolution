@@ -1,0 +1,93 @@
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb
+
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#Create environment for preprocessing reads
+#mamba create -p $BASEDIR/env/preprocess
+
+mamba activate $BASEDIR/env/preprocess
+
+#Install axe demultiplexer
+mamba install -c kdm801 axe-demultiplexer
+
+cd $BASEDIR
+
+# Demultiplexed reads (https://gitlab.com/relshire/gbs-pipeline-scripts/-/tree/master/axe-demultiplexer) with -m 0 flag
+
+#Make directory
+mkdir Demultiplex
+
+#Plate 1-2
+sbatch Code/Scripts/demultiplex.plate1.2.sh
+
+#Plate 3-4
+sbatch Code/Scripts/demultiplex.plate3.4.sh
+
+#Toronto
+sbatch Code/Scripts/demultiplex.tor.sh
+
+
+# Trim Reads
+
+## Trim adaptors (Dec 4, 2023)
+
+#Renamed .fastq.gz to make it easier to read/transcribe
+#- Created keyfile of forward and reverse reads and barcodes 
+#- Copied files into new director: TrimGalore
+#- Removed blank wells from keyfile
+#    - Toronto: G3, E5, D9, H11, A-H12  
+#    - Plate 1: B5, H12
+#    - Plate 2: F9, H12
+#    - Plate 3: G1, H12
+#    - Plate 4: H2, H12 
+#-	Trim reads with TrimGalore wrapper batch_trim.pl https://github.com/relshire/GBS-PreProcess) with Phred cutoff: 20. Note: perl, not bash
+#- Note: all files (including trim_keyfile and batch_trim) must be in same folder as samples
+
+#Copy script
+git -C Code clone https://github.com/relshire/GBS-PreProcess/
+
+# Install cutadapt and fastqc
+#mamba create -p $BASEDIR/env/preprocess/cutadaptenv
+mamba activate $BASEDIR/env/preprocess/cutadaptenv
+cp Code/GBS-PreProcess/batch_trim.pl Demuliplex
+
+mamba install cutadapt #v4.9
+mamba install fastqc #v0.12.1
+mamba install trim-galore 
+
+# Run Trim Galore
+
+#Move to demultiplex directory
+cd Demultiplex
+#Create trimmed file directory
+mkdir $BASEDIR/Trimmed
+
+sbatch $BASEDIR/Code/Scripts/trim_galore.sh
+
+conda deactivate cutadaptenv
+
+#Rename files for easy workability
+mamba install rename
+ls Trimmed
+cd Trimmed
+#Check first
+rename -n 's/\_val_1.fq/\.fq/' *val_1.fq.gz
+rename -n 's/\_val_2.fq/\.fq/' *val_2.fq.gz
+
+rename 's/\_val_1.fq/\.fq/' *val_1.fq.gz
+ls
+rename 's/\_val_2.fq/\.fq/' *val_2.fq.gz
+
+#Move trimming reports
+mkdir Reports
+mv *trimming_report.txt Reports/
+
+#Check quality
+mamba install multiqc
+cd ../
+multiqc Trimmed/ -o Trimmed/Reports
+
+conda deactivate

@@ -1,0 +1,66 @@
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb
+
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#Keep the same environment because we need a lot of the same tools
+mamba activate $BASEDIR/env/assembly
+
+#Install programs
+mamba install samtools #v 1.21
+mamba install gatk4 #V4.5.0.0
+mamba install bwa
+mamba install bcftools
+mamba install parallel
+mamba install vcftools 
+mamba install plink2y
+
+cd $BASEDIR
+#Call variants
+mkdir SNPs
+
+#test
+
+REF=$BASEDIR/Reference/Impatiens_capensis_hirise.fasta
+BAM=$BASEDIR/SeedSamples.txt
+
+bcftools mpileup -Ou -b $BAM -f $REF -I -a AD,DP,SP,ADF,ADR -d 50 | bcftools call -a GQ,GP -mv -Ov > SNPs/variants.vcf
+
+#Call SNPs from seed samples only
+sbatch Code/Scripts/CallSNPs.sh
+
+squeue -u rur000
+
+#Repeat with all sites (variant and invariant)
+sbatch Code/Scripts/CallSNPs.sh
+
+#Check quality of unfiltered file
+cd SNPs/
+bcftools stats variants.vcf > unfiltered.stats.txt
+
+
+#Filter variant file
+
+# Hard Filter for quality,strand bias and missingness and minor allele frequency
+bcftools filter -i'QUAL>30 && SP<3 && MQ>30' variants.vcf > variants_hardfilter.vcf
+bcftools stats variants_hardfilter.vcf > hardfilter.stats.txt
+
+# Filter for depth and quality, and remove multiallele calls and keep only snps
+bcftools filter -i'FMT/DP>10 & FMT/GQ>30' variants_hardfilter.vcf | bcftools view -m2 -M2 -v snps > variants_hardfilter.dp10.vcf
+bcftools stats variants_hardfilter.dp10.vcf > hardfilter.dp10.stats.txt
+
+#Apply popgen filters
+vcftools --vcf variants_hardfilter.dp10.vcf --remove-indels --maf 0.01 --max-missing 0.8 --recode --stdout > variants_hardfilter.dp10.geno.maf.vcf #After filtering, kept 9021 out of a possible 14689 Sites
+
+
+#Filter for depth and multialleles, but retain invariant calls
+bcftools filter -i'FMT/DP>10' allsites.vcf | bcftools view -M2 > allsites_hardfilter.vcf
+bcftools stats allsites_hardfilter.vcf > allsites_hardfilter.stats.txt
+
+
+#Pull sequences for blast
+
+
+

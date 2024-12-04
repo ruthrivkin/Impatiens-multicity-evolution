@@ -1,0 +1,203 @@
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb
+
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#mamba create -p $BASEDIR/env/pixy,use pixy base from pb work
+mamba activate /gpfs/fs7/grdi/genarcc/wp3/PolarBears/env/pixy
+
+mamba install pixy
+mamba install vcftools
+mamba install samtools
+mamba install bcftools
+mamba install plink2
+mamba install bedtools
+#Create files for pi calculation
+
+#Need variant and invariant sites, copy from CallVariants folder
+mkdir $BASEDIR/Analysis $BASEDIR/Analysis/Pixy
+
+#Copy variant and invariant files to Pixy folder
+cp SNPs/allsites_hardfilter.vcf Analysis/Pixy
+cp SNPs/variants_hardfilter.dp10.geno.maf.vcf Analysis/Pixy
+
+#Filter variant file for hwe 
+cd $BASEDIR/Analysis/Pixy
+
+#prune for ld
+bcftools +prune -m 0.1 -w 10000 variants_hardfilter.dp10.geno.maf.vcf -Ov -o variants_hardfilter.dp10.geno.maf.ld.vcf 
+
+vcftools --vcf variants_hardfilter.dp10.geno.maf.ld.vcf --hwe 0.001 --recode --stdout > variants_hardfilter.dp10.geno.maf.ld.hwe.vcf 
+#After filtering, kept 2232 out of a possible 2608 Sites
+
+#Concatenate vcfs
+bgzip variants_hardfilter.dp10.geno.maf.ld.hwe.vcf
+tabix variants_hardfilter.dp10.geno.maf.ld.hwe.vcf.gz
+
+bgzip allsites_hardfilter.vcf
+tabix allsites_hardfilter.vcf.gz
+
+bcftools concat -a --write-index=tbi -Oz *.vcf.gz -o pixy.vcf.gz
+
+#Test
+cd ../../
+
+pixy --stats pi fst dxy \
+--vcf Analysis/Pixy/pixy.vcf.gz \
+--populations Analysis/Pixy/PixyPopFile.txt \
+--window_size 10000
+--n_cores 8
+
+#Set up pixy
+sbatch Code/Scripts/pixy.sh
+squeue -u rur000
+
+
+#Plot figures
+sbatch Code/Scripts/PixyPlots.sh
+
+salloc --account=grdi_genarcc --partition=standard --time=24:00:00 --mincpus=1 --mem=200G
+
+
+#Update scaffold numbers in each file
+cd Analysis/Pixy/Output/
+head city/ldprune_pi.txt
+
+awk -F'\t' '{gsub(/[_]/, "\t", $2)} 1' OFS='\t' city/ldprune_pi.txt > test.txt
+head test.txt
+cut -f1,3,8-14 test.txt > test1.txt
+head test1.txt
+#Activate R
+R
+
+#Switch in to R
+.libPaths(new = "/gpfs/fs7/grdi/genarcc/wp3/PolarBears/env/R")
+library(cli)
+library(rlang)
+
+setwd("/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb/Analysis/Pixy")
+getwd()
+
+library(tidyverse)
+
+#Update scaffold numbers in each file
+pi<-read.table("Output/scaffold/pop_noldprune_pi.txt",sep="\t",header=T)
+fst<-read.table("Output/pop/pop_noldprune_fst.txt",sep="\t",header=T)
+dxy<-read.table("Output/pop/pop_noldprune_dxy.txt",sep="\t",header=T)
+
+head(pi)
+pi_scaffold <- pi %>%
+  separate(chromosome, c("sc", "scaffold", "ex"),  "_", extra = "merge") %>%
+  select(!c(sc, ex))
+head(pi_scaffold)
+write.table(pi_scaffold, "Output/scaffold/pop.scaffold_pi.txt")
+
+head(fst)
+fst_scaffold <- fst %>%
+  separate(chromosome, c("sc", "scaffold", "ex"),  "_", extra = "merge") %>%
+  select(!c(sc, ex))
+head(fst_scaffold)
+write.table(fst_scaffold, "Output/scaffold/pop.scaffold_fst.txt")
+
+head(dxy)
+dxy_scaffold <- dxy %>%
+  separate(chromosome, c("sc", "scaffold", "ex"),  "_", extra = "merge") %>%
+  select(!c(sc, ex))
+head(dxy_scaffold)
+write.table(dxy_scaffold, "Output/scaffold/pop.scaffold_dxy.txt")
+
+
+#Now open scaffold files
+pixy_to_long <- function(pixy_files){
+
+  pixy_df <- list()
+
+  for(i in 1:length(pixy_files)){
+
+    stat_file_type <- gsub(".*_|.txt", "", pixy_files[i])
+
+    if(stat_file_type == "pi"){
+
+      df <- read_delim(pixy_files[i], delim = "\t")
+      df <- df %>%
+        gather(-pop, -window_pos_1, -window_pos_2, -chromosome,
+               key = "statistic", value = "value") %>%
+        rename(pop1 = pop) %>%
+        mutate(pop2 = NA)
+
+      pixy_df[[i]] <- df
+
+
+    } else{
+
+      df <- read_delim(pixy_files[i], delim = "\t")
+      df <- df %>%
+        gather(-pop1, -pop2, -window_pos_1, -window_pos_2, -chromosome,
+               key = "statistic", value = "value")
+      pixy_df[[i]] <- df
+
+    }
+
+  }
+
+  bind_rows(pixy_df) %>%
+    arrange(pop1, pop2, chromosome, window_pos_1, statistic)
+
+}
+
+pixy_folder <- "Output/pop"
+pixy_files <- list.files(pixy_folder, full.names = TRUE)
+pixy_df <- pixy_to_long(pixy_files)
+
+
+# Create scaffold column
+test <- head(pixy_df)
+pixy_df_scaffold <- test %>%
+  separate(chromosome, c("sc", "scaffold", "ex"),  "_", extra = "merge") %>%
+  select(!c(sc, ex))
+                    
+
+
+
+
+unique(pixy_df$chromosome)
+unique(pixy_df_scaffold$scaffold)
+
+# create a custom labeller for special characters in pi/dxy/fst
+pixy_labeller <- as_labeller(c(avg_pi = "pi",
+                             avg_dxy = "D[XY]",
+                             avg_wc_fst = "F[ST]"),
+                             default = label_parsed)
+
+
+# plotting summary statistics across all chromosomes
+pixy_df_scaffold %>%
+  mutate(chrom_color_group = case_when(as.numeric(scaffold) %% 2 != 0 ~ "even",
+                                 TRUE ~ "odd" )) %>%
+  mutate(ch = factor(scaffold, levels = c(1:27))) %>%
+  filter(statistic %in% c("avg_pi", "avg_dxy", "avg_wc_fst")) %>%
+  ggplot(aes(x = (window_pos_1 + window_pos_2)/2, y = value, color = chrom_color_group))+
+  geom_point(size = 0.5, alpha = 0.5, stroke = 0)+
+  facet_grid(statistic ~ scaffold,
+             scales = "free_y", switch = "x", space = "free_x",
+             labeller = labeller(statistic = pixy_labeller,
+                                 value = label_value))+
+  xlab("Scaffold")+
+  ylab("Statistic Value")+
+  scale_color_manual(values = c("grey50", "black"))+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.spacing = unit(0.1, "cm"),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        legend.position ="none")+
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,NA))
+
+
+ggsave("Pixy.All.Chrom.pdf", width = 6.78, height = 5.3, dpi = 300)
+
+

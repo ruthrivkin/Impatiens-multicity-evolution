@@ -1,0 +1,104 @@
+#Set base directory
+BASEDIR=/gpfs/fs7/grdi/genarcc/wp3/PolarBears/ICurb
+
+#Source environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate
+
+#Create environment for preprocessing reads
+#mamba create -p $BASEDIR/env/assembly
+
+mamba activate $BASEDIR/env/assembly
+
+#Install programs
+mamba install samtools #v 1.21
+mamba install gatk4 #V4.5.0.0
+mamba install bwa
+mamba install bcftools
+mamba install parallel
+
+#Unpack reference genome
+cd ICurb
+bwa index Reference/Impatiens_capensis_hirise.fasta
+samtools faidx Reference/Impatiens_capensis_hirise.fasta
+
+#Get list of sample names
+for i in Trimmed/*_R1.fq.gz; do echo $(basename ${i%_R*}); done > samples.txt
+head samples.txt
+
+#test parallel, prints list of R1 samples
+parallel 'echo {}' :::: samples.txt
+
+mkdir Bams
+
+#test
+sbatch Code/Scripts/Assembly.sh Plate1.2__1A10 #test on one ind first
+samtools flagstats Bams/Plate1.2__1A1.bam | head -n 30 #4273281 + 0 mapped (99.80%
+
+#Run
+parallel 'sbatch Code/Scripts/Assembly.sh {}' :::: samples.txt
+
+#Rename bams to remove extra underscore (my bad that it got added in the first place)
+nano test__file.txt #make test file
+for i in *file.txt; do mv "$i" "`echo $i | sed 's/_//'`"; done
+#now the bams
+for i in Bams/*.bam; do mv "$i" "`echo $i | sed 's/_//'`"; done 
+
+
+#Add read groups
+#Remake sample list
+for i in Bams/*bam; do echo $(basename ${i%.*}); done > bamsamples.txt
+
+#Test
+samtools flagstats Bams/Plate1.2_1A1.bam  #4273281 + 0 mapped (99.80%
+samtools samples Bams/Plate1.2_1A1.bam
+
+gatk AddOrReplaceReadGroups \
+    I=Bams/Plate1.2_1A10.bam \
+    O=Bams/Plate1.2_1A10.RG.bam \
+    SORT_ORDER=coordinate \
+    RGLB=IC \
+    RGPU=x \
+    RGPL=illumina \
+    RGSM=Plate1.2_1A10
+
+samtools samples Bams/Plate1.2_1A1.RG.bam #Looks good
+
+#All asamples
+sbatch Code/Scripts/ReadGroups.sh
+
+
+#Mark Duplicates
+#test, not working
+mkdir test
+REF=$BASEDIR/Reference/Impatiens_capensis_hirise.fasta
+bwa mem -M -t 4 $REF Trimmed/Plate1.2__1A1_R1.fq.gz Trimmed/Plate1.2__1A1_R2.fq.gz | samtools view -b | samtools sort -T Plate1.2_1A1 > test/Plate1.2_1A1.bam
+
+
+gatk ValidateSamFile -I $BASEDIR/Bams/Plate1.2_1A2.RG.bam #clear
+samtools index Bams/Plate1.2_1A2.RG.bam 
+gatk MarkDuplicates -I Bams/Plate1.2_1A10.RG.bam -O Bams/Plate1.2_1A10.markdup.bam -M Bams/Plate1.2_1A10.duplicateinfo.txt 
+#only works when sent through the slurm scheduler
+
+#All samples
+sbatch Code/Scripts/MarkDuplicates.sh
+
+#Get mapping stats
+#mapping rate
+for i in Bams/*markdup.bam; do samtools flagstat $i | awk -F "[(|:]" 'NR == 7 {print $2}'; done >> maprate.txt #7 if samtools 1.17 is loaded
+
+#read mapping number (primary reads)
+for i in Bams/*markdup.bam; do samtools view -c -F 260 $i; done >> mapnumber.txt
+
+#Get aveerage depth
+samtools depth -a Bams/Plate1.2_1A2.markdup.bam | awk '{sum+=$3} END { print "Average = ",sum/NR}'
+
+
+#Save to csv
+paste -d " " bamsamples.txt mapnumber.txt maprate.txt > samplestatistics.csv
+
+
+
+
+
+squeue -u rur000
