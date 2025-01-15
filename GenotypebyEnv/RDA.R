@@ -51,13 +51,35 @@ env <- dplyr::select(sample.info, "City.Area.km2", "PercentImpervious", "Pop.cha
 
 
 
-
+#Control for pop structure
 #RDA
-rda <- rda(lfmm_data ~ ., data=env, coords = coord, scale=T)
-rda
-RsquareAdj(rda) # 0.0149256
-summary(rda)$concont
+pca <- read.table("PCA/ld.city.eigenvec")
+names(pca)[1] <- "City"
+names(pca)[2] <- "SampleName"
+names(pca)[3:ncol(pca)] <- paste0("PC", 1:(ncol(pca)-2))
 
+env$PC1 <- pca$PC1
+env$PC2 <- pca$PC2
+
+#Check correlation between PC1 and environmental predictors
+round(cor(env, env$PC1), 2)
+round(cor(env, env$PC2), 2)
+
+# correlation tests for whole dataset
+library(Hmisc)
+res <- rcorr(as.matrix(env)) # rcorr() accepts matrices only
+
+# display p-values (rounded to 3 decimals)
+round(res$P, 3)
+#Conclusion most are sign correlated
+
+#Run rda with PC1 alone (only correlations less than 0.5)
+env <- subset(env, select = -PC2)
+rda <- rda(lfmm_data ~ ., data=env, coords = coord, scale=T)
+
+rda
+RsquareAdj(rda) # 0.0336776
+summary(rda)$concont
 vif.cca(rda) #all below 10
 
 plot(rda, scaling=3)
@@ -76,12 +98,12 @@ c10 <- c(
   "palegreen2",
   "#CAB2D6")# lt purple
 
-pdf("Figures/RDA-Axis12.pdf")
+pdf("Figures/RDA-Axis12-popstructure.pdf")
 plot(rda, type="n", scaling=3)
 points(rda, display="species", pch=20, cex=0.7, col="lightgrey", scaling=3)           # the SNPs
 points(rda, display="sites", pch=21, cex=1.3, col="grey", scaling=3, bg=c10[city]) # the wolves
 text(rda, scaling=3, display="bp", col="blue", cex=1)                           # the predictors
-legend("bottomright", legend=levels(city), bty="n", col="gray32", pch=21, cex=1, pt.bg=c10)
+legend("bottomleft", legend=levels(city), bty="n", col="gray32", pch=21, cex=1, pt.bg=c10)
 dev.off()
 
 pdf("Figures/RDA-Axis13.pdf")
@@ -101,20 +123,22 @@ legend("bottomright", legend=levels(city), bty="n", col="gray32", pch=21, cex=1,
 dev.off()
 
 #Model significance
-signif.full <- anova.cca(rda, parallel=getOption("mc.cores")) # default is permutation=999
-signif.full #p = 0.001
+signif.full <- anova.cca(rda, parallel=getOption("mc.cores"), permutations = how(nperm=10000)) # default is permutation=999
+signif.full #p < 0.001
+
 
 #Check sign axes
-signif.axis <- anova.cca(rda, by="axis", parallel=getOption("mc.cores"))
-signif.axis #RDA 1 and 2
+signif.axis <- anova.cca(rda, by="axis")
+signif.axis #RDA 1,2,3
 
 #FInd outlier snps
 
-load.rda <- scores(rda, choices=c(1:2), display="species")  # Species scores for the first three constrained axes
+load.rda <- scores(rda, choices=c(1:3), display="species")  # Species scores for the first three constrained axes
 
 #RDA axes have pretty normal distn
 hist(load.rda[,1], main="Loadings on RDA1")
 hist(load.rda[,2], main="Loadings on RDA2")
+hist(load.rda[,3], main="Loadings on RDA2")
 
 #Find outliers with 3 standard deviation cutoff (two-tailed p-value = 0.012 (FDR = 1%)
 outliers <- function(x,z){
@@ -123,25 +147,27 @@ outliers <- function(x,z){
 }
 
 
-cand1 <- outliers(load.rda[,1],3) # 23
-cand2 <- outliers(load.rda[,2],3) # 20
+cand1 <- outliers(load.rda[,1],3) # 110
+cand2 <- outliers(load.rda[,2],3) # 39
+cand3 <- outliers(load.rda[,3],3) # 26
 
-ncand <- length(cand1) + length(cand2)
-ncand #43 outliers total
+ncand <- length(cand1) + length(cand2) + length(cand3)
+ncand #175 outliers total
 
 #Make dataframe of outlier snps
 cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
 cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
 
-colnames(cand1) <- colnames(cand2) <- c("axis","snp","loading")
+colnames(cand1) <- colnames(cand2) <- colnames(cand3) <- c("axis","snp","loading")
 
-cand <- rbind(cand1, cand2)
+cand <- rbind(cand1, cand2, cand3)
 cand$snp <- as.character(cand$snp)
 
 #Add in the correlations of each candidate SNP with the  environmental predictors:
 
-foo <- matrix(nrow=(ncand), ncol=6)  # 6 columns for 6 predictors
-colnames(foo) <- c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec")
+foo <- matrix(nrow=(ncand), ncol=7)  # 6 columns for 6 predictors
+colnames(foo) <- c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec", "PC1")
 
 for (i in 1:length(cand$snp)) {
   nam <- cand[i,2]
@@ -158,27 +184,29 @@ length(cand$snp[duplicated(cand$snp)]) #4
 
 foo <- cbind(cand$axis, duplicated(cand$snp)) 
 table(foo[foo[,1]==1,2]) #none on RDA1
-table(foo[foo[,1]==2,2]) #4 on RDA2
+table(foo[foo[,1]==2,2]) #0 on RDA2
+table(foo[foo[,1]==3,2]) #4 on RDA2
 
 #remove
 cand <- cand[!duplicated(cand$snp),] 
-length(cand$snp) #39
+length(cand$snp) #171
 
 #Count which snps correlated most strongly with which predictors
 for (i in 1:length(cand$snp)) {
   bar <- cand[i,]
-  cand[i,10] <- names(which.max(abs(bar[4:9]))) # gives the variable
-  cand[i,11] <- max(abs(bar[4:9]))              # gives the correlation
+  cand[i,11] <- names(which.max(abs(bar[4:10]))) # gives the variable
+  cand[i,12] <- max(abs(bar[4:10]))              # gives the correlation
 }
 
-colnames(cand)[10] <- "predictor"
-colnames(cand)[11] <- "correlation"
+colnames(cand)[11] <- "predictor"
+colnames(cand)[12] <- "correlation"
 
 table(cand$predictor) 
 #Most snps most strongly correlated with City area and temp
 
-#City.Area.km2          NDVI          Prec          Temp 
-#30             6             2             1 
+#City.Area.km2          NDVI           PC1          Prec          Temp 
+#50                      3           112             2             4        
+
 #Plot outliers
 
 sel <- cand$snp
@@ -189,6 +217,7 @@ env[env=="PercentImpervious"] <- 'orange'
 env[env=="NDVI"] <- '#33a02c'
 env[env=="Temp"] <- '#e31a1c'
 env[env=="Prec"] <- '#1f78b4'
+env[env=="PC1"] <- 'pink'
 
 # color by predictor:
 col.pred <- rownames(rda$CCA$v) # pull the SNP names
@@ -202,23 +231,39 @@ col.pred[grep("V",col.pred)] <- '#f1eef6' # non-candidate SNPs
 empty <- col.pred
 empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
 empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
-bg <- c('#ffff33','#6a3d9a','orange','#33a02c','#e31a1c','#1f78b4')
+bg <- c('#ffff33','#6a3d9a','orange','#33a02c','#e31a1c','#1f78b4', "pink")
 
 
 # axes 1 & 2
-pdf("Figures/RDA-outlier-Axis12.pdf")
+pdf("Figures/RDA-outlier-Axis12-popstructure.pdf")
 plot(rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
 points(rda, display="species", pch=21, cex=1, col="grey", bg=col.pred, scaling=3)
 points(rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
-text(rda, scaling=3, display="bp", col="blue", cex=1)
-legend("bottomright", legend=c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+text(rda, scaling=3, display="bp", col="black", cex=1)
+legend("bottomright", legend=c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec", "PC1"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+#axes 1 and 3
+pdf("Figures/RDA-outlier-Axis13-popstructure.pdf")
+plot(rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+points(rda, display="species", pch=21, cex=1, col="grey", bg=col.pred, scaling=3, choices=c(1,3))
+points(rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(rda, scaling=3, display="bp", col="black", cex=1, choices=c(1,3))
+legend("bottomright", legend=c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec", "PC1"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+#axes 2 and 3
+pdf("Figures/RDA-outlier-Axis23-popstructure.pdf")
+plot(rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(2,3))
+points(rda, display="species", pch=21, cex=1, col="grey", bg=col.pred, scaling=3, choices=c(2,3))
+points(rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(2,3))
+text(rda, scaling=3, display="bp", col="black", cex=1, choices=c(2,3))
+legend("bottomright", legend=c("City.Area.km2", "PercentImpervious", "Pop.change.rate", "NDVI", "Temp", "Prec", "PC1"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
 dev.off()
 
 
-
-
 #Which environments are most strongly cor
-intersetcor(rda)[,1:2]
+intersetcor(rda)[,1:3]
 
 #PCAAdapt
 library(pcadapt)
@@ -315,30 +360,51 @@ cand.merge$Order<- as.integer(cand.merge$Order)
 rda.outliers <- left_join(cand.merge, snp_info1)
 
 overlap.rda.snmf <- merge(rda.outliers, snmf.outliers)
-length(overlap.rda.snmf$Order) #25
+length(overlap.rda.snmf$Order) #130
 
 overlap.pca.snmf <- merge(pcadapt.outliers, snmf.outliers)
 length(overlap.pca.snmf$Order) #117
 
 overlap.pca.rda<- merge(pcadapt.outliers, rda.outliers)
-length(overlap.pca.rda$Order) #0
+length(overlap.pca.rda$Order) #13
 
 
 overlap.all <- merge(overlap.pca.snmf, rda.outliers) #0
-
+length(overlap.all$Order) #13
 
 #Get list of outlier loci regions for blast
+write_csv(overlap.all, "RDA/all_outliers.txt")
 
-overlap.rda.snmf
-write_csv(overlap.rda.snmf, "RDA/RDA_snmf_outliers.txt")
 #Create bed for searching genome (formate chr start end)
-bed <- dplyr::select(overlap.rda.snmf, c("Contig", "Pos"))
+overlap.rda.snmf <- read.csv("RDA/RDA_snmf_outliers.txt")
+
+bed <- dplyr::select(overlap.all, c("Contig", "Pos"))
 
 #Search withing 100 bp of each location
-bed1 <- bed %>%
+bed100bp <- bed %>%
   mutate(Start = Pos - 100,
          End = Pos + 100) %>%
   dplyr::select(Contig, Start, End)
-names(bed1) <- NULL
+names(bed100bp) <- NULL
 
-write_delim(bed1, "RDA/outlierlocs.txt", delim = " ")
+
+bed1kb <- bed %>%
+  mutate(Start = Pos - 1000,
+         End = Pos + 1000) %>%
+  dplyr::select(Contig, Start, End)
+names(bed1kb) <- NULL
+
+bed10kb <- bed %>%
+  mutate(Start = Pos - 10000,
+         End = Pos + 10000) %>%
+  dplyr::select(Contig, Start, End)
+names(bed10kb) <- NULL
+
+readr::write_delim(bed100bp, "RDA/outlierlocs100bp.txt", delim = " ", col_names = F)
+readr::write_delim(bed1kb, "RDA/outlierlocs1kb.txt", delim = " ", col_names = F)
+readr::write_delim(bed10kb, "RDA/outlierlocs10kb.txt", delim = " ", , col_names = F)
+
+
+
+
+

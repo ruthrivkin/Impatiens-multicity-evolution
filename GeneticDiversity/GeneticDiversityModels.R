@@ -155,20 +155,46 @@ Pi <- lm(Pi ~ PercentImpervious + NDVI + Temp + Prec + log(City.Area.km2) + Pop.
 summary(Pi)
 Anova(Pi, type = 3)
 
+#get r2
+rsq <- function(x, y) summary(lm(y~x))$r.squared
+rsq(summary$PercentImpervious, summary$Pi )
+rsq(summary$NDVI, summary$Pi)
+
+
 Ho <- lm(Ho ~ PercentImpervious + NDVI + Temp + Prec +log(City.Area.km2) + Pop.change.rate, 
          data = summary)
 summary(Ho)
 Anova(Ho, type = 3)
 
 coef(Ho)["log(City.Area.km2)"]/100 #1.462766e-05
+rsq(summary$PercentImpervious, summary$Ho)
+rsq(summary$NDVI, summary$Ho)
+
 
 Pa <- lm(PrivateAlleles ~ PercentImpervious + NDVI + Temp + Prec + log(City.Area.km2) + Pop.change.rate,
           data = summary)
 summary(Pa)
 Anova(Pa, type = 3)
+rsq(summary$PrivateAlleles, log(summary$City.Area.km2))
+rsq(summary$PrivateAlleles, summary$Temp)
+rsq(summary$PrivateAlleles, summary$Prec)
 
 
 cor.test(summary$Pi, summary$Ho)
+
+
+#Check shape of PA model
+CA2 <- (log(summary$City.Area.km2))^2
+
+Pa2 <- lm(PrivateAlleles ~ PercentImpervious + NDVI + Temp + Prec + log(City.Area.km2) + CA2 + Pop.change.rate,
+                data = summary)
+summary(Pa2)
+anova(Pa2, Pa)
+AIC(Pa)
+AIC(Pa2)
+
+
+#compare
 #Check residuals in space
 
 res <- Pi$residuals

@@ -3,7 +3,7 @@ setwd("/Users/ruthrivkin/Dropbox/Grad School 2015-2020/Impatiens capensis/Data f
 #Memgene
 
 #load sample info and extract relevant pop data
-sample.info <- read.csv("../../Datasheets/24.10.08_MasterData.csv", header = T)
+sample.info <- read.csv("../../Datasheets/24.10.21_MasterData.csv", header = T)
 pop.info <- sample.info[order(sample.info$ID),]
 
 
@@ -25,7 +25,7 @@ library(StAMPP)
 #load data
 city.gl@pop
 
-fst <- stamppFst(city.gl, nboots = 100, percent = 95, nclusters = 1)
+fst <- stamppFst(city.gl, nboots = 1000, percent = 95, nclusters = 1)
 fst.matrix <- as.data.frame(fst$Fsts)
 p.matrix <- as.data.frame(fst$Pvalues)
 

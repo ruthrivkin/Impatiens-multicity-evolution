@@ -35,7 +35,7 @@ vcf2lfmm("snmf/variants_hardfilter.dp10.geno.maf.ld_cityreoder.vcf", "snmf/ld.ci
 
 #snmf
 #Load geno
-pop.info <- read.csv("../../Datasheets/24.10.21_Master.Data.csv", header = T)
+pop.info <- read.csv("../../Datasheets/24.10.21_MasterData.csv", header = T)
 str(pop.info)
 pop.info <- dplyr::arrange(pop.info, City)
 #pop.info <- subset(pop.info, City != "Toronto"), no effect of removing toronto
@@ -47,9 +47,10 @@ genoin <- "snmf/variants_hardfilter.dp10.geno.maf.ld.hwe_cityreoder.geno"
 library(reshape2)
 library(dplyr)
 
-snmf.reorder = snmf(genoin, K = 1:15, ploidy = 2, entropy = T,
-                alpha = 100, project = "new", repetitions = 10, seed = 42)
+snmf.reorder = snmf(genoin, K = 1:10, ploidy = 2, entropy = T,
+                alpha = 100, project = "new", repetitions = 1, seed = 42)
 summary(snmf.reorder)
+
 
 snmf = load.snmfProject("snmf/variants_hardfilter.dp10.geno.maf.ld.hwe_city.snmfProject")
 
@@ -79,13 +80,14 @@ lowest.ce
 
 #plot ancestry matrix
 c25 <- c(
-  "dodgerblue2", "#E31A1C", # red
-  "green4",
-  "#6A3D9A", # purple
   "#FF7F00", # orange
+   "#E31A1C","pink", "dodgerblue2",# red
+  # purple
+  "#6A3D9A",
+  
    "gold1",
-  "skyblue2", "#FB9A99", # lt pink
-  "palegreen2",
+  "dodgerblue2",
+   "#FB9A99", # lt pink
   "#CAB2D6", # lt purple
   "#FDBF6F", # lt orange
   "gray70", "khaki2",
@@ -95,14 +97,14 @@ c25 <- c(
   
 
 pdf("snmf/Ind Admixture K=6.pdf", width = 6.78, height = 5.3)
-barchart(snmf.reorder, K = 6, run = lowest.ce, sort.by.Q = FALSE,
+barchart(snmf.reorder, K = 6, sort.by.Q = FALSE,
          border = NA, space = 0,
          col = c25,
          xlab = "Individuals",
          ylab = "Ancestry proportions K = 6",
          main = "Ancestry matrix") -> bp
-
-bp$city <- pop.info$City
+order <- read.delim("snmf/Reordersamples.txt", header = F)
+bp$city <- order$V1
 axis(1, at = 1:length(bp$city), 
      labels = bp$city, las = 3, 
      cex.axis = .4)
